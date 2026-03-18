@@ -1,0 +1,137 @@
+Beginner-friendly plan to build CodeCraftHub using Java and Spring Boot, storing course data in a JSON file (no database). It covers project structure, REST API endpoints, and how to read/write the JSON file.
+
+Tech choices
+Language: Java (11+ or 17+ recommended)
+Framework: Spring Boot (Spring Web)
+Data storage: JSON file (no database)
+No authentication or user management
+Focus: REST API basics
+Simple project structure (beginners)
+Root
+pom.xml (or build.gradle if you prefer Gradle)
+data/
+courses.json (the JSON storage file)
+src/
+main/
+java/
+com/
+codecrafthub/
+CodeCraftHubApplication.java // Spring Boot entry point
+model/
+Course.java // Data model
+repository/
+JsonCourseRepository.java // Reads/writes JSON file
+service/
+CourseService.java // Business logic
+controller/
+CourseController.java // REST API endpoints
+resources/
+application.properties // Spring config
+Optional: test/ for unit tests later
+Data model (Course) Fields to track:
+id: Long (unique identifier)
+name: String (course name)
+description: String (course description)
+targetDate: LocalDate (target completion date; ISO date format)
+status: String (Not Started, In Progress, Completed)
+Example JSON (courses.json) format: [ { "id": 1, "name": "Intro to Java", "description": "Beginner Java course", "targetDate": "2026-05-01", "status": "Not Started" } ]
+
+REST API endpoints to create
+GET /courses
+Description: Return all courses
+GET /courses/{id}
+Description: Return a course by id
+POST /courses
+Description: Create a new course (supply name, description, targetDate, status)
+Request body: JSON Course (id can be omitted; server assigns id)
+PUT /courses/{id}
+Description: Update an existing course by id
+Request body: JSON Course
+DELETE /courses/{id}
+Description: Delete a course by id
+Optional filtering (simple)
+GET /courses?status=In%20Progress
+GET /courses?name=Java
+How to store and retrieve data from JSON file (concept)
+Store: Maintain a single JSON array in data/courses.json.
+Retrieve: Read and deserialize the array into a List<Course> using Jackson (built into Spring Boot).
+Write: Serialize the List<Course> back to data/courses.json.
+Concurrency: Basic approach is to synchronize file access to avoid concurrent write issues.
+ID generation: Compute the next id by taking max existing id and adding 1.
+Key implementation ideas (code sketches) Note: These are compact, illustrative snippets. They show structure and approach; adapt to your project as you like.
+Course model (src/main/java/com/codecrafthub/model/Course.java)
+
+public class Course { private Long id; private String name; private String description; private LocalDate targetDate; private String status; // "Not Started", "In Progress", "Completed"
+
+// getters and setters // no-arg constructor (needed by Jackson) }
+
+Repository: JSON file access (src/main/java/com/codecrafthub/repository/JsonCourseRepository.java)
+
+private final Path path = Paths.get("data", "courses.json");
+
+private final Object lock = new Object();
+
+public List<Course> loadAll() { synchronized (lock) { if (!Files.exists(path)) return new ArrayList<>(); ObjectMapper mapper = new ObjectMapper(); // support LocalDate mapper.findAndRegisterModules(); try { return mapper.readValue(path.toFile(), new TypeReference<List<Course>>() {}); } catch (IOException e) { throw new RuntimeException("Failed to read courses.json", e); } } }
+
+public void saveAll(List<Course> courses) { synchronized (lock) { ObjectMapper mapper = new ObjectMapper(); mapper.findAndRegisterModules(); mapper.enable(SerializationFeature.INDENT_OUTPUT); try { // write to temp file first for safety Path temp = Paths.get(path.toString() + ".tmp"); mapper.writeValue(temp.toFile(), courses); Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); } catch (IOException e) { throw new RuntimeException("Failed to write courses.json", e); } } }
+
+public synchronized Long getNextId(List<Course> list) { return list.stream().mapToLong(Course::getId).max().orElse(0L) + 1; }
+
+Basic CRUD helpers (find by id, add, update, delete) can be implemented using loadAll() and saveAll().
+
+Service: CourseService (src/main/java/com/codecrafthub/service/CourseService.java)
+
+@Service
+private final JsonCourseRepository repository;
+public List<Course> getAll() { return repository.loadAll(); }
+public Optional<Course> getById(Long id) { ... search in list ... }
+public Course create(Course course) { List<Course> list = repository.loadAll(); Long nextId = repository.getNextId(list); course.setId(nextId); list.add(course); repository.saveAll(list); return course; }
+public Course update(Long id, Course updated) { List<Course> list = repository.loadAll(); for (int i = 0; i < list.size(); i++) if (list.get(i).getId().equals(id)) { updated.setId(id); list.set(i, updated); repository.saveAll(list); return updated; } throw new NotFoundException("Course not found"); }
+public void delete(Long id) { … remove from list and save … }
+Controller: REST endpoints (src/main/java/com/codecrafthub/controller/CourseController.java)
+
+@RestController
+@RequestMapping("/courses")
+@Autowired CourseService service;
+GET /courses -> return service.getAll()
+GET /courses/{id} -> return service.getById(id) or 404
+POST /courses -> @RequestBody Course c; return service.create(c)
+PUT /courses/{id} -> @RequestBody Course c; return service.update(id, c)
+DELETE /courses/{id} -> service.delete(id); return 204 No Content
+Application entry (src/main/java/com/codecrafthub/CodeCraftHubApplication.java)
+
+@SpringBootApplication
+public static void main(String[] args) { SpringApplication.run(CodeCraftHubApplication.class, args); }
+Application properties (src/main/resources/application.properties)
+
+server.port=8080
+spring.jackson.serialization.WRITE_DATES_AS_TIMESTAMPS=false
+optional: spring.config.import=optional:.. if needed
+How to run and test (quickstart)
+Create project with Spring Initializr or your favorite IDE:
+Dependencies: Spring Web (and Lombok if you like, but not required)
+Create data/courses.json (empty array []) or start with a few sample courses.
+Ensure you have the repository and service/controller wired correctly (Spring will autowire).
+Build and run:
+mvn clean package
+java -jar target/CodeCraftHub-0.0.1-SNAPSHOT.jar
+Default port 8080 (adjust in application.properties if needed)
+Test with curl (examples):
+GET all: curl http://localhost:8080/courses
+GET by id: curl http://localhost:8080/courses/1
+Create: curl -X POST -H "Content-Type: application/json" -d '{"name":"Kotlin Essentials","description":"Kotlin basics","targetDate":"2026-07-01","status":"Not Started"}' http://localhost:8080/courses
+Update: curl -X PUT -H "Content-Type: application/json" -d '{"name":"Kotlin Essentials","description":"Kotlin basics updated","targetDate":"2026-07-15","status":"In Progress"}' http://localhost:8080/courses/1
+Delete: curl -X DELETE http://localhost:8080/courses/1
+Optional enhancements for beginners
+Add basic filtering in GET /courses?status=In%20Progress or ?name=Java by filtering the loaded list.
+Validate input in the controller (e.g., not null name, proper date).
+Improve id generation by persisting a separate counter or using UUIDs.
+Handle 404s gracefully with a simple exception handler.
+Add a small README with setup/run instructions and curl examples.
+Quick reference checklist
+Project: Spring Boot app with a single JSON file as storage
+Data model: Course (id, name, description, targetDate, status)
+Storage: data/courses.json, read/write via Jackson (ObjectMapper)
+Endpoints: GET/POST/PUT/DELETE for /courses and /courses/{id}
+No authentication; simple, educational REST API example
+If you’d like, I can provide complete, copy-paste-ready code for each class (Course, JsonCourseRepository, CourseService, CourseController, and the Spring Boot application) to jump-start your project.
